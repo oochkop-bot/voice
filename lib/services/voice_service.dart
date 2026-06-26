@@ -9,19 +9,43 @@ class VoiceService {
 
   static const _base = 'https://api.elevenlabs.io/v1';
 
-  /// 15-30 сек аудио файлаас тухайн хүний хоолойг хуулбарлаж,
-  /// шинэ voice_id буцаана (Instant Voice Cloning).
+  /// Монгол кирилл текстийг латин руу хувиргаж, зөвхөн ASCII үлдээнэ.
+  static String _ascii(String input, {String fallback = 'MyVoice'}) {
+    const map = {
+      'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+      'ж': 'j', 'з': 'z', 'и': 'i', 'й': 'i', 'к': 'k', 'л': 'l', 'м': 'm',
+      'н': 'n', 'о': 'o', 'ө': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
+      'у': 'u', 'ү': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
+      'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e',
+      'ю': 'yu', 'я': 'ya',
+    };
+    final buf = StringBuffer();
+    for (final ch in input.toLowerCase().split('')) {
+      if (map.containsKey(ch)) {
+        buf.write(map[ch]);
+      } else if (ch.codeUnitAt(0) < 128) {
+        buf.write(ch);
+      }
+    }
+    final out = buf.toString().trim();
+    return out.isEmpty ? fallback : out;
+  }
+
   Future<String> cloneVoice({
     required String name,
     required String filePath,
-    String description = 'Cowork апп-аар хуулбарласан хоолой',
+    String description = 'Voice cloned via app',
   }) async {
     final uri = Uri.parse('$_base/voices/add');
     final request = http.MultipartRequest('POST', uri)
       ..headers['xi-api-key'] = apiKey
-      ..fields['name'] = name
-      ..fields['description'] = description
-      ..files.add(await http.MultipartFile.fromPath('files', filePath));
+      ..fields['name'] = _ascii(name)
+      ..fields['description'] = _ascii(description, fallback: 'cloned voice')
+      ..files.add(await http.MultipartFile.fromPath(
+        'files',
+        filePath,
+        filename: 'sample.m4a',
+      ));
 
     final streamed = await request.send();
     final resp = await http.Response.fromStream(streamed);
@@ -35,7 +59,6 @@ class VoiceService {
     return data['voice_id'] as String;
   }
 
-  /// Текстийг хуулбарласан хоолойгоор дуу болгож, mp3 байтуудыг буцаана.
   Future<List<int>> synthesize({
     required String voiceId,
     required String text,
@@ -48,9 +71,8 @@ class VoiceService {
         'Content-Type': 'application/json',
         'Accept': 'audio/mpeg',
       },
-      body: jsonEncode({
+      body: utf8.encode(jsonEncode({
         'text': text,
-        // Олон хэл (монгол) дэмждэг загвар.
         'model_id': 'eleven_multilingual_v2',
         'voice_settings': {
           'stability': 0.5,
@@ -58,7 +80,7 @@ class VoiceService {
           'style': 0.0,
           'use_speaker_boost': true,
         },
-      }),
+      })),
     );
 
     if (resp.statusCode != 200) {
@@ -69,7 +91,6 @@ class VoiceService {
     return resp.bodyBytes;
   }
 
-  /// Хуулбарласан хоолойг устгах (заавал биш).
   Future<void> deleteVoice(String voiceId) async {
     await http.delete(
       Uri.parse('$_base/voices/$voiceId'),
